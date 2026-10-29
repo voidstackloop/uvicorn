@@ -7,6 +7,7 @@ import json
 import logging
 import signal
 import sys
+import time
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager
 
@@ -276,3 +277,18 @@ async def test_reset_contextvars_asyncio(
     ) as extract_json_body:
         assert await extract_json_body(large_request) == {}
         assert await extract_json_body(SIMPLE_GET_REQUEST) == {}
+
+
+async def test_idle_server_shutdown_prompt(unused_tcp_port: int) -> None:
+    server = Server(Config(app=dummy_app, port=unused_tcp_port, lifespan="off", log_level="error"))
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.001)
+
+    started = time.perf_counter()
+    server.should_exit = True
+    await task
+    elapsed = time.perf_counter() - started
+    # An idle server without active connections should shut down promptly (< 50 ms),
+    # avoiding the unconditional 200 ms sleep in main_loop and shutdown.
+    assert elapsed < 0.08
